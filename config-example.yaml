@@ -8,6 +8,8 @@ log_level: INFO
 
 # Only one consumer can be enabled at a time, you can
 # delete the section for the consumer which you aren't using
+# Supported platforms for network consumers are 'linux',
+# 'macos' or 'windows'
 chia_logs:
   file_log_consumer:
     enable: true
@@ -17,6 +19,7 @@ chia_logs:
     remote_file_path: '~/.chia/mainnet/log/debug.log'
     remote_host: "192.168.0.100"
     remote_user: "chia"
+    remote_platform: "linux"
 
 # Enable this and chiadog will ping a remote server every 5 minutes
 # That way you can know that the monitoring is running as expected

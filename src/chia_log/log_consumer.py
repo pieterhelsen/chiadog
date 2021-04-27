@@ -75,13 +75,16 @@ class FileLogConsumer(LogConsumer):
 class NetworkLogConsumer(LogConsumer):
     """Consume logs over the network"""
 
-    def __init__(self, remote_log_path: Path, remote_user, remote_host):
+    SUPPORTED_PLATFORMS = ["linux", "macos", "windows"]
+
+    def __init__(self, remote_log_path: Path, remote_user, remote_host, remote_platform="linux"):
         logging.info("Enabled network log consumer.")
         super().__init__()
 
         self._remote_user = remote_user
         self._remote_host = remote_host
         self._remote_log_path = remote_log_path
+        self._remote_platform = self._get_remote_platform(remote_platform)
 
         self._ssh_client = paramiko.client.SSHClient()
         self._ssh_client.load_system_host_keys()
@@ -98,11 +101,23 @@ class NetworkLogConsumer(LogConsumer):
 
     def _consume_loop(self):
         logging.info(f"Consuming remote log file {self._remote_log_path} from {self._remote_host}")
-        stdin, stdout, stderr = self._ssh_client.exec_command(f"tail -F {self._remote_log_path}")
+
+        if self._remote_platform in ["linux", "macos"]:
+            stdin, stdout, stderr = self._ssh_client.exec_command(f"tail -F {self._remote_log_path}")
+        elif self._remote_platform == "windows":
+            stdin, stdout, stderr = self._ssh_client.exec_command(f"Get-Content {self._remote_log_path} -Wait")
 
         while self._is_running:
             log_line = stdout.readline()
             self._notify_subscribers(log_line)
+
+    def _get_remote_platform(self, platform: str):
+
+        if platform not in self.SUPPORTED_PLATFORMS:
+            logging.error(f"Unsupported platform ({platform}), assuming Linux.")
+            platform = "linux"
+
+        return platform
 
 
 def create_log_consumer_from_config(config: dict) -> Optional[LogConsumer]:
@@ -133,6 +148,7 @@ def create_log_consumer_from_config(config: dict) -> Optional[LogConsumer]:
             remote_log_path=Path(enabled_consumer_config["remote_file_path"]),
             remote_host=enabled_consumer_config["remote_host"],
             remote_user=enabled_consumer_config["remote_user"],
+            remote_platform = enabled_consumer_config["remote_platform"]
         )
 
     logging.error("Unhandled consumer type")
