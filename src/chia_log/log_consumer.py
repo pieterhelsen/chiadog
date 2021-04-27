@@ -105,7 +105,7 @@ class NetworkLogConsumer(LogConsumer):
         if self._remote_platform in ["linux", "macos"]:
             stdin, stdout, stderr = self._ssh_client.exec_command(f"tail -F {self._remote_log_path}")
         elif self._remote_platform == "windows":
-            stdin, stdout, stderr = self._ssh_client.exec_command(f"Get-Content {self._remote_log_path} -Wait")
+            stdin, stdout, stderr = self._ssh_client.exec_command(f"powershell Get-Content {self._remote_log_path} -Wait -Tail 25")
 
         while self._is_running:
             log_line = stdout.readline()
