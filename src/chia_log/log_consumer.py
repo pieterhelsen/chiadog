@@ -15,10 +15,12 @@ from threading import Thread
 from typing import List, Optional
 
 # project
-from src.config import check_keys
+from src.config import check_keys, is_win_platform
 
 # lib
 import paramiko
+
+from src.util import OS
 
 
 class LogConsumerSubscriber(ABC):
@@ -66,7 +68,13 @@ class FileLogConsumer(LogConsumer):
     def _consume_loop(self):
         expanded_user_log_path = self._log_path.expanduser()
         logging.info(f"Consuming log file from {expanded_user_log_path}")
-        f = subprocess.Popen(["tail", "-F", expanded_user_log_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        if is_win_platform():
+            consume_command_args = ["powershell.exe", "get-content", expanded_user_log_path, "-tail", "1", "-wait"]
+        else:
+            consume_command_args = ["tail", "-F", expanded_user_log_path]
+
+        f = subprocess.Popen(consume_command_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         while self._is_running:
             log_line = f.stdout.readline().decode(encoding="utf-8")
             self._notify_subscribers(log_line)
@@ -90,6 +98,8 @@ class NetworkLogConsumer(LogConsumer):
         self._ssh_client.load_system_host_keys()
         self._ssh_client.connect(hostname=self._remote_host, username=self._remote_user)
 
+        self._remote_platform = self._get_remote_platform()
+
         # Start thread
         self._is_running = True
         self._thread = Thread(target=self._consume_loop)
@@ -100,24 +110,32 @@ class NetworkLogConsumer(LogConsumer):
         self._is_running = False
 
     def _consume_loop(self):
-        logging.info(f"Consuming remote log file {self._remote_log_path} from {self._remote_host}")
+        logging.info(f"Consuming remote log file {self._remote_log_path} from {self._remote_host} ({self._remote_platform})")
 
-        if self._remote_platform in ["linux", "macos"]:
+        if self._remote_platform == OS.WINDOWS:
+            stdin, stdout, stderr = self._ssh_client.exec_command(f"powershell.exe Get-Content {self._remote_log_path} -Wait -Tail 1")
+        else:
             stdin, stdout, stderr = self._ssh_client.exec_command(f"tail -F {self._remote_log_path}")
-        elif self._remote_platform == "windows":
-            stdin, stdout, stderr = self._ssh_client.exec_command(f"powershell Get-Content {self._remote_log_path} -Wait -Tail 25")
 
         while self._is_running:
             log_line = stdout.readline()
             self._notify_subscribers(log_line)
 
-    def _get_remote_platform(self, platform: str):
+    def _get_remote_platform(self):
+        stdin, stdout, stderr = self._ssh_client.exec_command(f"uname -a")
+        fout: str = stdout.readline().lower()
+        ferr: str = stderr.readline().lower()
 
-        if platform not in self.SUPPORTED_PLATFORMS:
-            logging.error(f"Unsupported platform ({platform}), assuming Linux.")
-            platform = "linux"
+        if 'linux' in fout:
+            return OS.LINUX
+        elif 'darwin' in fout:
+            return OS.MACOS
+        elif 'not recognized' in ferr:
+            return OS.WINDOWS
+        else:
+            logging.error(f"Found unsupported platform on remote host, assuming Linux and hope for the best.")
 
-        return platform
+        return OS.LINUX
 
 
 def create_log_consumer_from_config(config: dict) -> Optional[LogConsumer]:
